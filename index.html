@@ -33,14 +33,14 @@ canvas{width:100%;height:auto;display:block;touch-action:none;background:white;c
 .art img{width:100%;display:block;aspect-ratio:1.2;object-fit:contain;background:white;cursor:pointer}
 .art button{width:100%;border:0;border-top:1px solid #eee;border-radius:0;font-size:12px}
 #empty{text-align:center;color:#999;padding:35px 5px;font-size:13px}
-#status{font-size:12px;color:#777;margin-top:12px}
+#status{font-size:12px;color:#777;margin-top:12px}#cloudStatus{font-size:12px;color:#6652cf;margin:8px 0}
 @media(max-width:650px){main{grid-template-columns:1fr;padding:9px;gap:10px}.panel{padding:12px}header{padding:15px}header h2{font-size:18px}}
 </style>
 </head>
 <body>
 <header>
 <h2>🎨 My Drawing Studio</h2>
-<span>나만의 그림 작업실</span>
+<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span id="userInfo">로그인하지 않았어요</span><button id="loginBtn">Google 로그인</button><button id="logoutBtn" style="display:none">로그아웃</button></div>
 </header>
 <main>
 <section class="panel">
@@ -85,13 +85,19 @@ canvas{width:100%;height:auto;display:block;touch-action:none;background:white;c
 <section class="panel">
 <h3>🖼️ 저장한 그림</h3>
 <p style="font-size:12px;color:#888">그림을 저장하면 여기에 모여요. 그림을 누르면 다시 불러올 수 있어요.</p>
-<div id="gallery"></div>
+<p id="cloudStatus">로그인하면 그림을 계정에 저장할 수 있어요.</p><div id="gallery"></div>
 <div id="empty">아직 저장한 그림이 없어요.<br>첫 번째 그림을 그려보세요! 🎨</div>
 </section>
 </main>
-<script>
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, serverTimestamp, query, orderBy } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore.js";
+const firebaseConfig = { apiKey:"AIzaSyD6KNnzggqUF9nJ8ICr0m4ibm0hVg3Y-v0", authDomain:"my-drawing-ab16d.firebaseapp.com", projectId:"my-drawing-ab16d", storageBucket:"my-drawing-ab16d.firebasestorage.app", messagingSenderId:"977584482613", appId:"1:977584482613:web:311160b9e40428405d047c", measurementId:"G-LZ7YZRF122" };
+const app=initializeApp(firebaseConfig), auth=getAuth(app), db=getFirestore(app), provider=new GoogleAuthProvider();
 (()=>{
 const $=id=>document.getElementById(id);
+let currentUser=null;
 const canvas=$('canvas'),ctx=canvas.getContext('2d');
 let color='#222222',size=5,opacity=1,tool='pen',enabled=true;
 let drawing=false,start=null,last=null,history=[],redoStack=[];
@@ -186,45 +192,35 @@ $('clear').onclick=()=>{
  if(!confirm('그림을 모두 지울까요?'))return;
  remember();ctx.clearRect(0,0,canvas.width,canvas.height);
 };
-function getGallery(){
- try{return JSON.parse(localStorage.getItem(KEY)||'[]');}catch(e){return [];}
-}
-function renderGallery(){
- const items=getGallery(),gallery=$('gallery');
- gallery.innerHTML='';$('empty').style.display=items.length?'none':'block';
- items.forEach((item,index)=>{
- const card=document.createElement('div');card.className='art';
- const img=document.createElement('img');img.src=item.data;img.alt='저장된 그림 '+(index+1);
- img.title='눌러서 그림 불러오기';
- img.onclick=()=>{
- if(!confirm('이 그림을 캔버스에 불러올까요? 현재 그림은 대체됩니다.'))return;
- remember();
- const picture=new Image();
- picture.onload=()=>{ctx.clearRect(0,0,900,620);ctx.drawImage(picture,0,0,900,620);};
- picture.src=item.data;
- };
- const del=document.createElement('button');del.textContent='🗑️ 삭제';
- del.onclick=()=>{
- if(!confirm('이 사진을 삭제할까요?'))return;
- const list=getGallery();list.splice(index,1);
- try{localStorage.setItem(KEY,JSON.stringify(list));renderGallery();}
- catch(e){alert('삭제에 실패했어요.');}
- };
- card.append(img,del);gallery.append(card);
- });
-}
-$('save').onclick=()=>{
- const out=document.createElement('canvas');out.width=900;out.height=620;
- const c=out.getContext('2d');c.fillStyle='white';c.fillRect(0,0,900,620);c.drawImage(canvas,0,0);
- const data=out.toDataURL('image/png');
- const items=getGallery();
- items.unshift({data,time:Date.now()});
+async function getGallery(){try{return JSON.parse(localStorage.getItem(KEY)||"[]");}catch(e){return [];}}
+async function renderGallery(){
+ const gallery=$("gallery");gallery.innerHTML="";
  try{
- localStorage.setItem(KEY,JSON.stringify(items));
- renderGallery();$('status').textContent='✓ 그림을 저장했어요!';
- }catch(e){alert('브라우저 저장 공간이 부족해요. 기존 사진을 삭제해 주세요.');}
+  let items=[];
+  if(currentUser){const snap=await getDocs(query(collection(db,"users",currentUser.uid,"drawings"),orderBy("createdAt","desc")));items=snap.docs.map(d=>({id:d.id,...d.data()}));}
+  else items=await getGallery();
+  $("empty").style.display=items.length?"none":"block";
+  $("cloudStatus").textContent=currentUser?"☁️ Google 계정 클라우드 갤러리":"현재 이 기기에만 저장돼요. Google 로그인하면 계정에 동기화돼요."; 
+  items.forEach((item,index)=>{
+   const card=document.createElement("div");card.className="art";
+   const img=document.createElement("img");img.src=item.data;img.alt="저장된 그림 "+(index+1);img.title="눌러서 불러오기";
+   img.onclick=()=>{if(!confirm("이 그림을 캔버스에 불러올까요? 현재 그림은 대체됩니다."))return;remember();const pic=new Image();pic.onload=()=>{ctx.clearRect(0,0,900,620);ctx.drawImage(pic,0,0,900,620);};pic.src=item.data;};
+   const del=document.createElement("button");del.textContent="🗑️ 삭제";
+   del.onclick=async()=>{if(!confirm("이 사진을 삭제할까요?"))return;try{if(currentUser)await deleteDoc(doc(db,"users",currentUser.uid,"drawings",item.id));else{const list=await getGallery();list.splice(index,1);localStorage.setItem(KEY,JSON.stringify(list));}await renderGallery();}catch(e){alert("삭제 실패: "+e.message);}};
+   card.append(img,del);gallery.append(card);
+  });
+ }catch(e){$("cloudStatus").textContent="클라우드 오류: Firestore 보안 규칙을 확인해 주세요.";console.error(e);}
+}
+$("save").onclick=async()=>{
+ const out=document.createElement("canvas");out.width=900;out.height=620;const c=out.getContext("2d");c.fillStyle="white";c.fillRect(0,0,900,620);c.drawImage(canvas,0,0);
+ const data=out.toDataURL("image/jpeg",0.68);$("save").disabled=true;
+ try{if(currentUser){if(data.length>850000)throw new Error("그림 파일이 너무 커요. 그림을 단순하게 한 뒤 다시 저장해 주세요.");await addDoc(collection(db,"users",currentUser.uid,"drawings"),{data,createdAt:serverTimestamp()});$("status").textContent="✓ Google 계정에 그림을 저장했어요!";}
+ else{const items=await getGallery();items.unshift({data,time:Date.now()});localStorage.setItem(KEY,JSON.stringify(items));$("status").textContent="✓ 이 기기에 저장했어요. 다른 기기 동기화는 Google 로그인 후 가능해요.";}await renderGallery();
+ }catch(e){alert("저장 실패: "+e.message);}finally{$("save").disabled=false;}
 };
-renderGallery();
+$("loginBtn").onclick=async()=>{try{await signInWithPopup(auth,provider);}catch(e){alert("로그인 실패: "+e.message);}};
+$("logoutBtn").onclick=async()=>{try{await signOut(auth);}catch(e){alert("로그아웃 실패: "+e.message);}};
+onAuthStateChanged(auth,async user=>{currentUser=user;$("userInfo").textContent=user?(user.displayName||user.email)+" 로그인됨":"로그인하지 않았어요";$("loginBtn").style.display=user?"none":"inline-block";$("logoutBtn").style.display=user?"inline-block":"none";await renderGallery();});
 })();
 </script>
 </body>
