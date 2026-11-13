@@ -1,0 +1,231 @@
+
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>My Drawing Studio 🎨</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;font-family:Arial,sans-serif;background:#f4f4f8;color:#222}
+header{padding:18px 22px;background:#25243a;color:white;display:flex;justify-content:space-between;align-items:center}
+header h2{margin:0;font-size:21px}
+main{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(220px,1fr);gap:16px;padding:16px;max-width:1500px;margin:auto}
+.panel{background:white;border-radius:15px;padding:16px;box-shadow:0 2px 12px #0000000c;min-width:0}
+h3{margin:0 0 15px}
+.toolbar{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+button{border:1px solid #ddd;background:white;border-radius:9px;padding:9px 12px;cursor:pointer}
+button.active{background:#e9e5ff;border-color:#7761db;color:#5038b5;font-weight:bold}
+button:disabled{opacity:.4;cursor:not-allowed}
+#toggle{background:#238a56;color:white}
+#toggle.off{background:#888}
+#colors{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}
+.swatch{width:27px;height:27px;border-radius:50%;padding:0}
+.swatch.selected{outline:2px solid #7258d5;outline-offset:3px}
+.settings{display:flex;gap:20px;flex-wrap:wrap;margin:12px 0;font-size:13px}
+.settings label{flex:1;min-width:110px}
+input[type=range]{width:100%;display:block;margin-top:8px}
+canvas{width:100%;height:auto;display:block;touch-action:none;background:white;cursor:crosshair;border:1px solid #ddd;border-radius:8px}
+.actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.primary{background:#6652cf;color:white;border:0;font-weight:bold}
+#gallery{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.art{border:1px solid #eee;border-radius:10px;overflow:hidden;min-width:0}
+.art img{width:100%;display:block;aspect-ratio:1.2;object-fit:contain;background:white;cursor:pointer}
+.art button{width:100%;border:0;border-top:1px solid #eee;border-radius:0;font-size:12px}
+#empty{text-align:center;color:#999;padding:35px 5px;font-size:13px}
+#status{font-size:12px;color:#777;margin-top:12px}
+@media(max-width:650px){main{grid-template-columns:1fr;padding:9px;gap:10px}.panel{padding:12px}header{padding:15px}header h2{font-size:18px}}
+</style>
+</head>
+<body>
+<header>
+<h2>🎨 My Drawing Studio</h2>
+<span>나만의 그림 작업실</span>
+</header>
+<main>
+<section class="panel">
+<h3>✏️ 그림 그리기</h3>
+<div class="toolbar">
+<button id="toggle">펜 ON</button>
+<button class="active tool" data-tool="pen">✏️ 연필</button>
+<button class="tool" data-tool="marker">🖍️ 마커</button>
+<button class="tool" data-tool="eraser">🧽 지우개</button>
+<button class="tool" data-tool="line">📏 직선</button>
+<button class="tool" data-tool="rect">▭ 사각형</button>
+<button class="tool" data-tool="circle">◯ 원</button>
+</div>
+<strong style="font-size:13px">🎨 색상</strong>
+<div id="colors">
+<button class="swatch selected" style="background:#222" data-color="#222222"></button>
+<button class="swatch" style="background:#ef4444" data-color="#ef4444"></button>
+<button class="swatch" style="background:#f97316" data-color="#f97316"></button>
+<button class="swatch" style="background:#facc15" data-color="#facc15"></button>
+<button class="swatch" style="background:#22c55e" data-color="#22c55e"></button>
+<button class="swatch" style="background:#06b6d4" data-color="#06b6d4"></button>
+<button class="swatch" style="background:#3b82f6" data-color="#3b82f6"></button>
+<button class="swatch" style="background:#a855f7" data-color="#a855f7"></button>
+<button class="swatch" style="background:#ec4899" data-color="#ec4899"></button>
+<input type="color" id="custom" value="#222222" aria-label="직접 색상 선택">
+</div>
+<div class="settings">
+<label>붓 굵기 <b id="sizeText">5px</b>
+<input id="size" type="range" min="1" max="40" value="5"></label>
+<label>투명도 <b id="opacityText">100%</b>
+<input id="opacity" type="range" min="10" max="100" value="100"></label>
+</div>
+<canvas id="canvas" width="900" height="620"></canvas>
+<div class="actions">
+<button id="undo">↶ 실행 취소</button>
+<button id="redo">↷ 다시 실행</button>
+<button id="clear">🗑️ 지우기</button>
+<button id="save" class="primary">💾 그림 저장</button>
+</div>
+<p id="status">그림을 그려보세요!</p>
+</section>
+<section class="panel">
+<h3>🖼️ 저장한 그림</h3>
+<p style="font-size:12px;color:#888">그림을 저장하면 여기에 모여요. 그림을 누르면 다시 불러올 수 있어요.</p>
+<div id="gallery"></div>
+<div id="empty">아직 저장한 그림이 없어요.<br>첫 번째 그림을 그려보세요! 🎨</div>
+</section>
+</main>
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const canvas=$('canvas'),ctx=canvas.getContext('2d');
+let color='#222222',size=5,opacity=1,tool='pen',enabled=true;
+let drawing=false,start=null,last=null,history=[],redoStack=[];
+const KEY='myDrawingGalleryV1';
+function imageData(){return ctx.getImageData(0,0,canvas.width,canvas.height)}
+function remember(){history.push(imageData());if(history.length>40)history.shift();redoStack=[];}
+function undo(){
+ if(!history.length)return;
+ redoStack.push(imageData());
+ ctx.putImageData(history.pop(),0,0);
+}
+function redo(){
+ if(!redoStack.length)return;
+ history.push(imageData());
+ ctx.putImageData(redoStack.pop(),0,0);
+}
+function point(e){
+ const r=canvas.getBoundingClientRect();
+ return{x:(e.clientX-r.left)*canvas.width/r.width,y:(e.clientY-r.top)*canvas.height/r.height};
+}
+function shape(p){
+ ctx.beginPath();
+ if(tool==='line'){ctx.moveTo(start.x,start.y);ctx.lineTo(p.x,p.y);}
+ if(tool==='rect')ctx.rect(start.x,start.y,p.x-start.x,p.y-start.y);
+ if(tool==='circle')ctx.ellipse((start.x+p.x)/2,(start.y+p.y)/2,Math.abs(p.x-start.x)/2,Math.abs(p.y-start.y)/2,0,0,Math.PI*2);
+ ctx.stroke();
+}
+function paintStyle(){
+ ctx.globalAlpha=opacity;
+ ctx.globalCompositeOperation=tool==='eraser'?'destination-out':'source-over';
+ ctx.strokeStyle=color;
+ ctx.lineWidth=tool==='marker'?size*3:size;
+ ctx.lineCap='round';ctx.lineJoin='round';
+}
+canvas.addEventListener('pointerdown',e=>{
+ if(!enabled||drawing)return;
+ e.preventDefault();canvas.setPointerCapture(e.pointerId);
+ remember();drawing=true;start=last=point(e);
+ if(['pen','marker','eraser'].includes(tool)){
+ ctx.save();paintStyle();
+ ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(last.x+.1,last.y+.1);ctx.stroke();ctx.restore();
+ }
+});
+canvas.addEventListener('pointermove',e=>{
+ if(!drawing)return;
+ const p=point(e);
+ if(['pen','marker','eraser'].includes(tool)){
+ ctx.save();paintStyle();ctx.beginPath();ctx.moveTo(last.x,last.y);ctx.lineTo(p.x,p.y);ctx.stroke();ctx.restore();
+ }else{
+ ctx.putImageData(history[history.length-1],0,0);
+ ctx.save();ctx.globalAlpha=opacity;ctx.strokeStyle=color;ctx.lineWidth=size;shape(p);ctx.restore();
+ }
+ last=p;
+});
+function finish(e){
+ if(!drawing)return;
+ drawing=false;
+ if(['line','rect','circle'].includes(tool)){
+ ctx.save();ctx.globalAlpha=opacity;ctx.strokeStyle=color;ctx.lineWidth=size;shape(last);ctx.restore();
+ }
+ $('status').textContent='그림을 그리고 있어요. 저장 버튼을 눌러 보관하세요!';
+}
+canvas.addEventListener('pointerup',finish);
+canvas.addEventListener('pointercancel',finish);
+document.addEventListener('keydown',e=>{
+ if(!(e.ctrlKey||e.metaKey))return;
+ if(e.key.toLowerCase()==='z'){
+ e.preventDefault();if(e.shiftKey)redo();else undo();
+ }
+ if(e.key.toLowerCase()==='y'){e.preventDefault();redo();}
+});
+$('undo').onclick=undo;$('redo').onclick=redo;
+$('toggle').onclick=()=>{
+ enabled=!enabled;
+ $('toggle').textContent=enabled?'펜 ON':'펜 OFF';
+ $('toggle').classList.toggle('off',!enabled);
+ canvas.style.cursor=enabled?'crosshair':'not-allowed';
+};
+document.querySelectorAll('.tool').forEach(b=>b.onclick=()=>{
+ tool=b.dataset.tool;
+ document.querySelectorAll('.tool').forEach(x=>x.classList.toggle('active',x===b));
+});
+function setColor(c){
+ color=c;$('custom').value=c;
+ document.querySelectorAll('.swatch').forEach(b=>b.classList.toggle('selected',b.dataset.color===c));
+}
+document.querySelectorAll('.swatch').forEach(b=>b.onclick=()=>setColor(b.dataset.color));
+$('custom').oninput=e=>setColor(e.target.value);
+$('size').oninput=e=>{size=+e.target.value;$('sizeText').textContent=size+'px';};
+$('opacity').oninput=e=>{opacity=+e.target.value/100;$('opacityText').textContent=e.target.value+'%';};
+$('clear').onclick=()=>{
+ if(!confirm('그림을 모두 지울까요?'))return;
+ remember();ctx.clearRect(0,0,canvas.width,canvas.height);
+};
+function getGallery(){
+ try{return JSON.parse(localStorage.getItem(KEY)||'[]');}catch(e){return [];}
+}
+function renderGallery(){
+ const items=getGallery(),gallery=$('gallery');
+ gallery.innerHTML='';$('empty').style.display=items.length?'none':'block';
+ items.forEach((item,index)=>{
+ const card=document.createElement('div');card.className='art';
+ const img=document.createElement('img');img.src=item.data;img.alt='저장된 그림 '+(index+1);
+ img.title='눌러서 그림 불러오기';
+ img.onclick=()=>{
+ if(!confirm('이 그림을 캔버스에 불러올까요? 현재 그림은 대체됩니다.'))return;
+ remember();
+ const picture=new Image();
+ picture.onload=()=>{ctx.clearRect(0,0,900,620);ctx.drawImage(picture,0,0,900,620);};
+ picture.src=item.data;
+ };
+ const del=document.createElement('button');del.textContent='🗑️ 삭제';
+ del.onclick=()=>{
+ if(!confirm('이 사진을 삭제할까요?'))return;
+ const list=getGallery();list.splice(index,1);
+ try{localStorage.setItem(KEY,JSON.stringify(list));renderGallery();}
+ catch(e){alert('삭제에 실패했어요.');}
+ };
+ card.append(img,del);gallery.append(card);
+ });
+}
+$('save').onclick=()=>{
+ const out=document.createElement('canvas');out.width=900;out.height=620;
+ const c=out.getContext('2d');c.fillStyle='white';c.fillRect(0,0,900,620);c.drawImage(canvas,0,0);
+ const data=out.toDataURL('image/png');
+ const items=getGallery();
+ items.unshift({data,time:Date.now()});
+ try{
+ localStorage.setItem(KEY,JSON.stringify(items));
+ renderGallery();$('status').textContent='✓ 그림을 저장했어요!';
+ }catch(e){alert('브라우저 저장 공간이 부족해요. 기존 사진을 삭제해 주세요.');}
+};
+renderGallery();
+})();
+</script>
+</body>
+</html>
